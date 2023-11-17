@@ -1,0 +1,22 @@
+version: '3.11'
+services:
+  django:
+    build: .
+    container_name: eddefoot_django
+    command: python manage.py runserver 0.0.0.0:8001
+    ports:
+      - "8001:8001"
+  redis:
+    image: redis:alpine
+    container_name: eddefoot_redis
+  celery:
+    restart: always
+    container_name: eddefoot_celery
+    build:
+      context: .
+    volumes:
+      - .:/app
+    command: celery -A config worker -l INFO
+    depends_on:
+      - redis
+      - django
