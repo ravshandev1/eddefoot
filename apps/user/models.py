@@ -58,6 +58,7 @@ class User(AbstractBaseUser, PermissionsMixin):
     gender = models.PositiveIntegerField(choices=GANDER, default=0)
     role = models.PositiveIntegerField(default=0, choices=ROLE)
     rate = models.ForeignKey(Rate, models.SET_NULL, null=True)
+    firebase_token = models.TextField()
     is_superuser = models.BooleanField(default=False)
     is_staff = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -67,6 +68,12 @@ class User(AbstractBaseUser, PermissionsMixin):
 
     def __str__(self):
         return self.phone
+
+    @property
+    def get_image(self):
+        if self.image:
+            return self.image.url
+        return None
 
 
 class Parent(models.Model):
@@ -79,21 +86,44 @@ class Parent(models.Model):
 
 class Coach(models.Model):
     user = models.OneToOneField(User, models.CASCADE, related_name='my_students', limit_choices_to={'role': 2})
-    students = models.ManyToManyField(User, related_name='coach', limit_choices_to={'role': 0})
 
     def __str__(self):
         return self.user.phone
+
+
+class SubCoach(models.Model):
+    coach = models.ForeignKey(Coach, models.CASCADE, related_name='sub_class')
+    student = models.OneToOneField(User, models.CASCADE, related_name='coach', limit_choices_to={'role': 0})
+
+    def __str__(self):
+        return self.student.phone
 
 
 class Psychological(models.Model):
     user = models.OneToOneField(User, models.CASCADE, related_name='students', limit_choices_to={'role': 3})
-    students = models.ManyToManyField(User, related_name='psychological', limit_choices_to={'role': 0})
 
     def __str__(self):
         return self.user.phone
 
 
-class Chat(models.Model):
+class SubPsychologist(models.Model):
+    psychologist = models.ForeignKey(Psychological, models.CASCADE, related_name='sub_class')
+    student = models.OneToOneField(User, models.CASCADE, related_name='psychological', limit_choices_to={'role': 0})
+
+    def __str__(self):
+        return self.student.phone
+
+
+class ChatRoom(models.Model):
+    sender = models.ForeignKey(User, models.CASCADE, related_name='sender_chat_rooms')
+    receiver = models.ForeignKey(User, models.CASCADE, related_name='receiver_chat_rooms')
+
+    def __str__(self):
+        return f'{self.id}'
+
+
+class Message(models.Model):
+    room = models.ForeignKey(ChatRoom, models.CASCADE, related_name='messages')
     message = models.TextField()
     sender = models.ForeignKey(User, models.CASCADE, related_name='senders')
     receiver = models.ForeignKey(User, models.CASCADE, related_name='receivers')
@@ -131,15 +161,6 @@ class Lesson(models.Model):
 
     def __str__(self):
         return self.name
-
-
-class ParentControl(models.Model):
-    user = models.ForeignKey(User, models.CASCADE, related_name='parent_controls')
-    time = models.CharField(max_length=250)
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    def __str__(self):
-        return self.user.phone
 
 
 class Feedback(models.Model):

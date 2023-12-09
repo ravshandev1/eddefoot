@@ -2,7 +2,9 @@ from rest_framework import views, generics, response, status, permissions
 from rest_framework.authtoken.models import Token
 from random import randint
 from datetime import date, datetime, timedelta
+from pytz import timezone
 from django.conf import settings
+from django.db.models import Q
 from . import models
 from . import serializers
 from .permissions import IsStudentUser, IsParentUser, IsCoachUser, IsPsychologicalUser
@@ -11,7 +13,120 @@ from .utils import verify, subscribe
 from .tasks import send_notification_task
 from .payment import client, client_receipt
 from exercise.models import Rate, PriceOfSubscribe
-import pytz
+
+
+class StudentChatAPI(views.APIView):
+    permission_classes = [IsStudentUser]
+
+    def get(self, request, *args, **kwargs):
+        ls = list()
+        coach = models.Coach.objects.filter(sub_class__student=self.request.user).first()
+        dt = serializers.StudentChatSerializer(coach).data
+        mes = models.Message.objects.filter(sender_id=coach.user.id, receiver_id=self.request.user.id, seen=False)
+        dt['messages_count'] = mes.count()
+        ls.append(dt)
+        ps = models.Psychological.objects.filter(sub_class__student=self.request.user).first()
+        dt = serializers.StudentChatSerializer(ps).data
+        mes = models.Message.objects.filter(sender_id=ps.user.id, receiver_id=self.request.user.id, seen=False)
+        dt['messages_count'] = mes.count()
+        ls.append(dt)
+        for i in self.request.user.parent.all():
+            dt = serializers.StudentChatSerializer(i).data
+            mes = models.Message.objects.filter(sender_id=i.user.id, receiver_id=self.request.user.id, seen=False)
+            dt['messages_count'] = mes.count()
+            ls.append(dt)
+        return response.Response(ls)
+
+
+class ParentChatAPI(views.APIView):
+    permission_classes = [IsParentUser]
+
+    def get(self, request, *args, **kwargs):
+        data = list()
+        for i in self.request.user.children.children.all():
+            dt = serializers.ParentChatSerializer(i).data
+            mes = models.Message.objects.filter(sender_id=i.id, receiver_id=self.request.user.id, seen=False)
+            dt['messages_count'] = mes.count()
+            data.append(dt)
+            coach = models.Coach.objects.filter(sub_class__student=i).first()
+            dt = serializers.StudentChatSerializer(coach).data
+            mes = models.Message.objects.filter(sender_id=coach.user.id, receiver_id=self.request.user.id, seen=False)
+            dt['messages_count'] = mes.count()
+            dt['student'] = i.name
+            data.append(dt)
+            ps = models.Psychological.objects.filter(sub_class__student=i).first()
+            dt = serializers.StudentChatSerializer(ps).data
+            mes = models.Message.objects.filter(sender_id=ps.user.id, receiver_id=self.request.user.id, seen=False)
+            dt['messages_count'] = mes.count()
+            dt['student'] = i.name
+            data.append(dt)
+        return response.Response(data)
+
+
+class CoachChatAPI(views.APIView):
+    permission_classes = [IsCoachUser]
+
+    def get(self, request, *args, **kwargs):
+        data = list()
+        for i in self.request.user.my_students.sub_class.all():
+            dt = serializers.CoachChatSerializer(i).data
+            mes = models.Message.objects.filter(sender_id=i.id, receiver_id=self.request.user.id, seen=False)
+            dt['messages_count'] = mes.count()
+            data.append(dt)
+            for j in models.Parent.objects.filter(children=i.student):
+                dt = serializers.StudentChatSerializer(j).data
+                mes = models.Message.objects.filter(sender_id=j.user.id, receiver_id=self.request.user.id, seen=False)
+                dt['messages_count'] = mes.count()
+                dt['child'] = i.student.name
+                data.append(dt)
+        return response.Response(data)
+
+
+class PsychologistChatAPI(views.APIView):
+    permission_classes = [IsPsychologicalUser]
+
+    def get(self, request, *args, **kwargs):
+
+        data = list()
+        for i in self.request.user.students.sub_class.all():
+            dt = serializers.CoachChatSerializer(i).data
+            mes = models.Message.objects.filter(sender_id=i.id, receiver_id=self.request.user.id, seen=False)
+            dt['messages_count'] = mes.count()
+            data.append(dt)
+            for j in models.Parent.objects.filter(children=i.student):
+                dt = serializers.StudentChatSerializer(j).data
+                mes = models.Message.objects.filter(sender_id=j.user.id, receiver_id=self.request.user.id, seen=False)
+                dt['messages_count'] = mes.count()
+                dt['child'] = i.student.name
+                data.append(dt)
+        return response.Response(data)
+
+
+class ChatRoomAPI(generics.ListAPIView):
+    pagination_class = CustomPagination
+    serializer_class = serializers.ChatSerializer
+    queryset = models.Message.objects.all()
+
+    def get(self, request, *args, **kwargs):
+        s_id = self.request.query_params.get('sender_id')
+        r_id = self.request.query_params.get('receiver_id')
+        if s_id and r_id:
+            chat_room = models.ChatRoom.objects.filter(
+                Q(sender_id=s_id, receiver_id=r_id) | Q(sender_id=r_id, receiver_id=s_id)).first()
+            if chat_room is None:
+                chat_room = models.ChatRoom.objects.create(sender_id=s_id, receiver_id=r_id)
+            qs = self.filter_queryset(models.Message.objects.filter(room_id=chat_room))
+            page = self.paginate_queryset(qs)
+            messages = list()
+            for i in page:
+                if i.sender.id == int(s_id):
+                    messages.append({'id': i.id, 'owner': 'sender', 'message': i.message, 'seen': i.seen,
+                                     'created_at': i.created_at.__format__("%-d/%m/%Y, %H:%M")})
+                else:
+                    messages.append({'id': i.id, 'owner': 'receiver', 'message': i.message,
+                                     'created_at': i.created_at.__format__("%-d/%m/%Y, %H:%M")})
+            return self.get_paginated_response({'id': chat_room.id, 'messages': messages})
+        return response.Response({'success': False, 'message': 'You forgot to give receiver_id or sender_id'})
 
 
 class CardCreateAPI(views.APIView):
@@ -61,7 +176,7 @@ class StudentRatePayAPI(views.APIView):
             try:
                 invoice_id = res['result']['receipt']['_id']
             except Exception as e:
-                print(res)
+                print(e)
                 return response.Response({'success': False, 'results': res['error']['message']},
                                          status=status.HTTP_400_BAD_REQUEST)
             pay = client_receipt.receipts_pay(rate.id, invoice_id, token, self.request.user.phone)
@@ -75,14 +190,14 @@ class StudentRatePayAPI(views.APIView):
             self.request.user.save()
             obj = models.Payment.objects.filter(user=self.request.user).first()
             if obj:
-                if obj.ended_at >= datetime.now(pytz.timezone(settings.TIME_ZONE)):
+                if obj.ended_at >= datetime.now(timezone(settings.TIME_ZONE)):
                     obj.ended_at += timedelta(days=365)
                 else:
-                    obj.ended_at = datetime.now(pytz.timezone(settings.TIME_ZONE)) + timedelta(days=365)
+                    obj.ended_at = datetime.now(timezone(settings.TIME_ZONE)) + timedelta(days=365)
                 obj.save()
             else:
                 models.Payment.objects.create(user=self.request.user,
-                                              ended_at=datetime.now(pytz.timezone(settings.TIME_ZONE)) + timedelta(
+                                              ended_at=datetime.now(timezone(settings.TIME_ZONE)) + timedelta(
                                                   days=365))
             return response.Response({'success': True, 'results': 'Your payment was made successfully'})
         else:
@@ -90,14 +205,14 @@ class StudentRatePayAPI(views.APIView):
             self.request.user.save()
             obj = models.Payment.objects.filter(user=self.request.user).first()
             if obj:
-                if obj.ended_at >= datetime.now(pytz.timezone(settings.TIME_ZONE)):
+                if obj.ended_at >= datetime.now(timezone(settings.TIME_ZONE)):
                     obj.ended_at += timedelta(days=365)
                 else:
-                    obj.ended_at = datetime.now(pytz.timezone(settings.TIME_ZONE)) + timedelta(days=365)
+                    obj.ended_at = datetime.now(timezone(settings.TIME_ZONE)) + timedelta(days=365)
                 obj.save()
             else:
                 models.Payment.objects.create(user=self.request.user,
-                                              ended_at=datetime.now(pytz.timezone(settings.TIME_ZONE)) + timedelta(
+                                              ended_at=datetime.now(timezone(settings.TIME_ZONE)) + timedelta(
                                                   days=365))
             return response.Response({'success': True, 'results': 'Your payment was made successfully'})
 
@@ -130,14 +245,14 @@ class ParentRatePayAPI(views.APIView):
             user.save()
             obj = models.Payment.objects.filter(user=user).first()
             if obj:
-                if obj.ended_at >= datetime.now(pytz.timezone(settings.TIME_ZONE)):
+                if obj.ended_at >= datetime.now(timezone(settings.TIME_ZONE)):
                     obj.ended_at += timedelta(days=365)
                 else:
-                    obj.ended_at = datetime.now(pytz.timezone(settings.TIME_ZONE)) + timedelta(days=365)
+                    obj.ended_at = datetime.now(timezone(settings.TIME_ZONE)) + timedelta(days=365)
                 obj.save()
             else:
                 models.Payment.objects.create(user=user,
-                                              ended_at=datetime.now(pytz.timezone(settings.TIME_ZONE)) + timedelta(
+                                              ended_at=datetime.now(timezone(settings.TIME_ZONE)) + timedelta(
                                                   days=365))
             return response.Response({'success': True, 'results': 'Your payment was made successfully'})
         else:
@@ -145,14 +260,14 @@ class ParentRatePayAPI(views.APIView):
             user.save()
             obj = models.Payment.objects.filter(user=user).first()
             if obj:
-                if obj.ended_at >= datetime.now(pytz.timezone(settings.TIME_ZONE)):
+                if obj.ended_at >= datetime.now(timezone(settings.TIME_ZONE)):
                     obj.ended_at += timedelta(days=365)
                 else:
-                    obj.ended_at = datetime.now(pytz.timezone(settings.TIME_ZONE)) + timedelta(days=365)
+                    obj.ended_at = datetime.now(timezone(settings.TIME_ZONE)) + timedelta(days=365)
                 obj.save()
             else:
                 models.Payment.objects.create(user=user,
-                                              ended_at=datetime.now(pytz.timezone(settings.TIME_ZONE)) + timedelta(
+                                              ended_at=datetime.now(timezone(settings.TIME_ZONE)) + timedelta(
                                                   days=365))
             return response.Response({'success': True, 'results': 'Your payment was made successfully'})
 
@@ -180,14 +295,14 @@ class SubscribeStudentAPI(views.APIView):
                                      status=status.HTTP_400_BAD_REQUEST)
         obj = models.Payment.objects.filter(user=self.request.user).first()
         if obj:
-            if obj.ended_at >= datetime.now(pytz.timezone(settings.TIME_ZONE)):
+            if obj.ended_at >= datetime.now(timezone(settings.TIME_ZONE)):
                 obj.ended_at += timedelta(days=365)
             else:
-                obj.ended_at = datetime.now(pytz.timezone(settings.TIME_ZONE)) + timedelta(days=365)
+                obj.ended_at = datetime.now(timezone(settings.TIME_ZONE)) + timedelta(days=365)
             obj.save()
         else:
             models.Payment.objects.create(user=self.request.user,
-                                          ended_at=datetime.now(pytz.timezone(settings.TIME_ZONE)) + timedelta(
+                                          ended_at=datetime.now(timezone(settings.TIME_ZONE)) + timedelta(
                                               days=365))
         return response.Response({'success': True})
 
@@ -216,15 +331,14 @@ class SubscribeParentAPI(views.APIView):
                                      status=status.HTTP_400_BAD_REQUEST)
         obj = models.Payment.objects.filter(user=user).first()
         if obj:
-            if obj.ended_at >= datetime.now(pytz.timezone(settings.TIME_ZONE)):
+            if obj.ended_at >= datetime.now(timezone(settings.TIME_ZONE)):
                 obj.ended_at += timedelta(days=365)
             else:
-                obj.ended_at = datetime.now(pytz.timezone(settings.TIME_ZONE)) + timedelta(days=365)
+                obj.ended_at = datetime.now(timezone(settings.TIME_ZONE)) + timedelta(days=365)
             obj.save()
         else:
-            models.Payment.objects.create(user=user,
-                                          ended_at=datetime.now(pytz.timezone(settings.TIME_ZONE)) + timedelta(
-                                              days=365))
+            models.Payment.objects.create(user=user, ended_at=datetime.now(timezone(settings.TIME_ZONE)) + timedelta(
+                days=365))
         return response.Response({'success': True})
 
 
@@ -246,21 +360,27 @@ class FeedbackAPI(views.APIView):
 class CoachStudentsRatingAPI(generics.ListAPIView):
     permission_classes = [IsCoachUser]
     pagination_class = CustomPagination
-    serializer_class = serializers.RatingSerializer
+    serializer_class = serializers.StudentRatingSerializer
 
     def get_queryset(self):
-        qs = models.Coach.objects.filter(user=self.request.user).first()
-        return qs.students.order_by('-point')
+        ls = list()
+        for i in self.request.user.my_students.sub_class.all():
+            ls.append(i)
+        ls.sort(key=lambda x: x.student.point, reverse=True)
+        return ls
 
 
 class PsychologicalStudentsRatingAPI(generics.ListAPIView):
     permission_classes = [IsPsychologicalUser]
     pagination_class = CustomPagination
-    serializer_class = serializers.RatingSerializer
+    serializer_class = serializers.StudentRatingSerializer
 
     def get_queryset(self):
-        qs = models.Psychological.objects.filter(user=self.request.user).first()
-        return qs.students.order_by('-point')
+        ls = list()
+        for i in self.request.user.students.sub_class.all():
+            ls.append(i)
+        ls.sort(key=lambda x: x.student.point, reverse=True)
+        return ls
 
 
 class MyChildPlanAPI(generics.ListAPIView):
@@ -300,7 +420,7 @@ class RatingAPI(generics.ListAPIView):
         return models.User.objects.filter(role=0).order_by('-point')
 
 
-class LoginAPI(views.APIView):
+class StudentLoginAPI(views.APIView):
 
     def post(self, request, *args, **kwargs):
         phone = self.request.data.get('phone', None)
@@ -359,6 +479,7 @@ class CoachLoginAPI(views.APIView):
             user.role = 2
             user.save()
             Token.objects.create(user_id=user.id)
+            models.Coach.objects.create(user_id=user.id)
             return response.Response(
                 {'success': True, 'message': 'User registered verification code was sent to your phone',
                  'is_registered': True}, status=status.HTTP_201_CREATED)
@@ -381,6 +502,7 @@ class PLoginAPI(views.APIView):
             user.role = 3
             user.save()
             Token.objects.create(user_id=user.id)
+            models.Psychological.objects.create(user_id=user.id)
             return response.Response(
                 {'success': True, 'message': 'User registered verification code was sent to your phone',
                  'is_registered': True}, status=status.HTTP_201_CREATED)
@@ -594,7 +716,7 @@ class LessonCoachAPI(generics.ListAPIView):
     def post(self, request, *args, **kwargs):
         data = dict()
         data['sender'] = self.request.user.id
-        data['students'] = [i.id for i in self.request.user.my_students.students.all()]
+        data['students'] = [i.student.id for i in self.request.user.my_students.sub_class.all()]
         data['name'] = self.request.data['name']
         data['image'] = self.request.data['image']
         data['link'] = self.request.data['link']
@@ -621,7 +743,7 @@ class LessonPsychologicalAPI(generics.ListAPIView):
     def post(self, request, *args, **kwargs):
         data = dict()
         data['sender'] = self.request.user.id
-        data['students'] = [i.id for i in self.request.user.students.students.all()]
+        data['students'] = [i.student.id for i in self.request.user.students.sub_class.all()]
         data['name'] = self.request.data['name']
         data['image'] = self.request.data['image']
         data['link'] = self.request.data['link']

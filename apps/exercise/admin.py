@@ -16,6 +16,8 @@ class ExerciseAdmin(StackAdmin):
 @admin.register(Theme)
 class ThemeAdmin(CustomAdmin):
     inlines = [ExerciseAdmin]
+    list_display = ['name', 'ordinal_number']
+    list_filter = ['modul']
 
 
 class ModulAdmin(StackAdmin):
@@ -26,3 +28,4 @@ class ModulAdmin(StackAdmin):
 @admin.register(Rate)
 class RateAdmin(CustomAdmin):
     inlines = [ModulAdmin]
+    list_display = ['id', 'price']

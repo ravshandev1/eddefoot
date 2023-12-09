@@ -3,7 +3,7 @@ from . import views
 
 urlpatterns = [
     path('', views.UserAPI.as_view()),
-    path('student-login/', views.LoginAPI.as_view()),
+    path('student-login/', views.StudentLoginAPI.as_view()),
     path('parent-login/', views.ParentLoginAPI.as_view()),
     path('coach-login/', views.CoachLoginAPI.as_view()),
     path('pschologist-login/', views.PLoginAPI.as_view()),
@@ -36,4 +36,9 @@ urlpatterns = [
     path('coach-lesson/', views.LessonCoachAPI.as_view()),
     path('pschologist-lesson/', views.LessonPsychologicalAPI.as_view()),
     path('feedback/', views.FeedbackAPI.as_view()),
+    path('chat-room/', views.ChatRoomAPI.as_view()),
+    path('student-chats/', views.StudentChatAPI.as_view()),
+    path('parent-chats/', views.ParentChatAPI.as_view()),
+    path('coach-chats/', views.CoachChatAPI.as_view()),
+    path('pschologist-chats/', views.PsychologistChatAPI.as_view()),
 ]

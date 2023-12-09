@@ -15,12 +15,14 @@ ENV = dotenv_values(os.path.join(BASE_DIR, '.env'))
 SECRET_KEY = ENV.get('SECRET_KEY')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = int(ENV.get('DEBUG')) == 1
 
 ALLOWED_HOSTS = ['*']
 CORS_ALLOW_ALL_ORIGINS = True
+CSRF_TRUSTED_ORIGINS = ['https://eddefoot.ravshandev.uz']
 SMS_URL = ENV.get('SMS_URL')
 SMS_TOKEN = ENV.get('SMS_TOKEN')
+FIREBASE_KEY = ENV.get('FIREBASE_KEY')
 
 # Application definition
 
@@ -48,9 +50,7 @@ INSTALLED_APPS = [
 
 # CELERY settings
 CELERY_BROKER_URL = 'redis://redis:6379'
-# CELERY_BROKER_URL = 'redis://127.0.0.1:6379'
 CELERY_RESULT_BACKEND = 'redis://redis:6379'
-# CELERY_RESULT_BACKEND = 'redis://127.0.0.1:6379'
 CELERY_ACCEPT_CONTENT = ['application/json']
 CELERY_RESULT_SERIALIZER = 'json'
 CELERY_TASK_SERIALIZER = 'json'
@@ -74,7 +74,7 @@ AUTH_USER_MODEL = 'user.User'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [],
+        'DIRS': [os.path.join(BASE_DIR, '.')],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -134,9 +134,6 @@ REST_FRAMEWORK = {
         'rest_framework.authentication.TokenAuthentication'
     ]
 }
-LOCALE_PATHS = (
-    os.path.join(BASE_DIR, 'locale'),
-)
 LANGUAGES = (
     ('en', 'English'),
     ('ru', 'Russian'),
@@ -163,9 +160,6 @@ USE_TZ = True
 STATIC_URL = 'static/'
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 STATICFILES_DIRS = [os.path.join(BASE_DIR, 'static')]
-
-MEDIA_URL = 'media/'
-MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/4.2/ref/settings/#default-auto-field

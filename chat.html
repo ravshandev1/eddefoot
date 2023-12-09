@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset='utf-8'>
+    <meta http-equiv='X-UA-Compatible' content='IE=edge'>
+    <title>Lobby</title>
+    <meta name='viewport' content='width=device-width, initial-scale=1'>
+
+</head>
+<body>
+<h1>Lets chat!</h1>
+
+<form id="user1" style="margin-left: 30%">
+    <input type="text" name="message"/>
+</form>
+<form id="user2" style="margin-right: 30%">
+    <input type="text" name="message"/>
+</form>
+
+<div id="messages"></div>
+
+<iframe
+        allow="camera; microphone; display-capture; fullscreen; clipboard-read; clipboard-write; autoplay"
+        src="https://p2p.mirotalk.com/join/room_name"
+        style="height: 100vh; width: 100vw; border: 0px;"
+        id="meeting"
+></iframe>
+<script type="text/javascript">
+    let iframe = document.getElementById('meeting');
+    const req = fetch("https://p2p.mirotalk.com/api/v1/meeting", {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            "Authorization": "mirotalk_default_secret"
+        }
+    });
+    iframe.src = 'https://p2p.mirotalk.com/join/' + req.json()
+    let protocol = window.location.protocol === "https:" ? "wss" : "ws";
+    const chatSocket = new WebSocket(protocol + '://' + window.location.host + '/1/');
+    chatSocket.onmessage = function (e) {
+        let data = JSON.parse(e.data)
+        console.log('Data:', data)
+
+        if (data.type === 'created') {
+            let messages = document.getElementById('messages')
+            messages.insertAdjacentHTML('beforeend', `<div><h3>${data.message}</h3></div>`)
+            chatSocket.send(JSON.stringify({
+                'ids': [data.id],
+                'type': 'seen'
+            }))
+        } else if (data.type === 'read') {
+            let messages = document.getElementById('messages')
+            messages.insertAdjacentHTML('beforeend', `<div><h3>${data.message}</h3></div>`)
+        }
+    }
+
+    let user1 = document.getElementById('user1')
+    user1.addEventListener('submit', (e) => {
+        e.preventDefault()
+        let message = e.target.message.value
+        chatSocket.send(JSON.stringify({
+            'message': message,
+            'sender': 2,
+            'receiver': 3,
+            'type': 'send'
+        }))
+        user1.reset()
+    })
+    let user2 = document.getElementById('user2')
+    user2.addEventListener('submit', (e) => {
+        e.preventDefault()
+        let message = e.target.message.value
+        chatSocket.send(JSON.stringify({
+            'message': message,
+            'sender': 3,
+            'receiver': 2,
+            'type': 'send'
+        }))
+        user2.reset()
+    })
+
+</script>
+</body>
+</html>
